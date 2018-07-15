@@ -285,9 +285,11 @@ var MochaAdapter = function () {
             if (this.nextRetry) {
                 // remove suites until we are to the suite to retry
                 // we can't reach a suite without being ok on the previous one
+                var suites = this.runner.suite.suites.slice();
                 this.runner.suite.suites.some(function (suite) {
-                    return suite.title === _this3.nextRetry || !_this3.runner.suite.suites.shift();
+                    return suite.title === _this3.nextRetry || !suites.shift();
                 });
+                this.runner.suite.suites = suites;
                 this.nextRetry = null;
             }
         }
