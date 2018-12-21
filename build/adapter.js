@@ -229,7 +229,7 @@ var MochaAdapter = function () {
             var _ref2 = (0, _asyncToGenerator3.default)( /*#__PURE__*/_regenerator2.default.mark(function _callee2(mocha) {
                 var _this2 = this;
 
-                var result;
+                var result, timeout;
                 return _regenerator2.default.wrap(function _callee2$(_context2) {
                     while (1) {
                         switch (_context2.prev = _context2.next) {
@@ -253,17 +253,24 @@ var MochaAdapter = function () {
                                 result = _context2.sent;
 
                                 if (!(this.runner.failures && this.isRetryNeeded())) {
-                                    _context2.next = 8;
+                                    _context2.next = 10;
                                     break;
                                 }
 
                                 this.prepareRetry(mocha);
-                                return _context2.abrupt('return', this.mochaRun(mocha));
+                                timeout = (this.retried[this.nextRetry] - 1) * 10000;
 
-                            case 8:
+                                console.log('will retry ' + this.nextRetry + ' in ' + timeout + 'ms');
+                                return _context2.abrupt('return', new _promise2.default(function (resolve) {
+                                    return setTimeout(function () {
+                                        return resolve(_this2.mochaRun(mocha));
+                                    }, timeout);
+                                }));
+
+                            case 10:
                                 return _context2.abrupt('return', result);
 
-                            case 9:
+                            case 11:
                             case 'end':
                                 return _context2.stop();
                         }
