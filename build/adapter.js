@@ -258,7 +258,7 @@ var MochaAdapter = function () {
                                 }
 
                                 this.prepareRetry(mocha);
-                                timeout = (this.retried[this.nextRetry] - 1) * 10000;
+                                timeout = (this.retried[this.nextRetry] - 1) * 20000;
 
                                 console.log('will retry ' + this.nextRetry + ' in ' + timeout + 'ms');
                                 return _context2.abrupt('return', new _promise2.default(function (resolve) {
