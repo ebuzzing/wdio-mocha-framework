@@ -39,6 +39,10 @@ class MochaAdapter {
         this.hookCnt = new Map()
         this.testCnt = new Map()
         this.suiteIds = ['0']
+        this.retrySuite = this.config.mochaOpts.retrySuite || 0
+        this.retried = {}
+        this.nextRetry = null
+        this.runtimeError = null
     }
 
     async run () {
@@ -51,34 +55,89 @@ class MochaAdapter {
         this.specs.forEach((spec) => mocha.addFile(spec))
         mocha.suite.on('pre-require', ::this.preRequire)
 
-        let runtimeError
         await executeHooksWithArgs(this.config.before, [this.capabilities, this.specs])
+        const result = await this.mochaRun(mocha)
+        await executeHooksWithArgs(this.config.after, [this.runtimeError || result, this.capabilities, this.specs])
+
+        /**
+         * in case the spec has a runtime error throw after the wdio hook
+         */
+        if (this.runtimeError) {
+            throw this.runtimeError
+        }
+
+        return result
+    }
+
+    async mochaRun(mocha) {
         const result = await new Promise((resolve) => {
             try {
                 this.runner = mocha.run(resolve)
             } catch (e) {
-                runtimeError = e
+                this.runtimeError = e
                 return resolve(1)
             }
 
             Object.keys(EVENTS).forEach((e) =>
                 this.runner.on(e, this.emit.bind(this, EVENTS[e])))
 
+            this.skipSuiteIfNeeded()
             this.runner.suite.beforeAll(this.wrapHook('beforeSuite'))
             this.runner.suite.beforeEach(this.wrapHook('beforeTest'))
             this.runner.suite.afterEach(this.wrapHook('afterTest'))
             this.runner.suite.afterAll(this.wrapHook('afterSuite'))
         })
-        await executeHooksWithArgs(this.config.after, [runtimeError || result, this.capabilities, this.specs])
 
-        /**
-         * in case the spec has a runtime error throw after the wdio hook
-         */
-        if (runtimeError) {
-            throw runtimeError
+        if (this.runner.failures && this.isRetryNeeded()) {
+            this.prepareRetry(mocha)
+            return this.mochaRun(mocha)
+        } else {
+            return result
         }
+    }
 
-        return result
+    skipSuiteIfNeeded() {
+        if (this.nextRetry) {
+            // remove suites until we are to the suite to retry
+            // we can't reach a suite without being ok on the previous one
+            const suites = this.runner.suite.suites.slice()
+            this.runner.suite.suites.some(suite => suite.title === this.nextRetry || !suites.shift())
+            this.runner.suite.suites = suites
+            this.nextRetry = null
+        }
+    }
+
+    isRetryNeeded() {
+        if (this.nextRetry) {
+            this.retried[this.nextRetry] = this.retried[this.nextRetry] ? ++this.retried[this.nextRetry] : 1
+            return this.retried[this.nextRetry] < this.retrySuite
+        } else {
+            return false
+        }
+    }
+
+    prepareRetry(mocha) {
+        mocha.files.forEach(file => {
+            delete require.cache[file]
+        })
+        mocha.suite.suites = []
+        this.runner.suite._afterEach = []
+        this.runner.suite._afterAll = []
+        this.runner.suite._beforeAll = []
+        this.runner.suite._beforeEach = []
+    }
+
+    abortNeeded(err, payload) {
+        if (err && payload.parent) {
+            const title = payload.parent.title
+            if (this.retrySuite &&
+                (!this.retried[title] || this.retried[title] < (this.retrySuite - 1))
+            ) {
+                this.nextRetry = title
+                return true
+            }
+        }
+        return false
     }
 
     options (options, context) {
@@ -213,11 +272,31 @@ class MochaAdapter {
          */
         if (payload.root) return
 
-        let message = this.formatMessage({ type: event, payload, err })
+        const uid = this.getUID(this.formatMessage({ type: event, payload, err }))
+
+        // if an error append, and retrySuite is setted
+        // we must abort the process now and retry the spec
+        if (this.abortNeeded(err, payload)) {
+            err = null
+            event = 'test:pending'
+            payload.state = undefined
+            payload.pending = true
+            this.runner.abort()
+        }
+
+        const message = this.formatMessage({ type: event, payload, err })
+
+        if (event.match('suite:') && this.retried[message.title]) {
+            message.title += ` (retry ${this.retried[message.title]})`
+        }
+
+        if (event.match('test:') && payload.parent && this.retried[payload.parent.title]) {
+            message.parent += ` (retry ${this.retried[payload.parent.title]})`
+        }
 
         message.cid = this.cid
         message.specs = this.specs
-        message.uid = this.getUID(message)
+        message.uid = uid
 
         if (message.error) {
             this.lastError = message.error
