@@ -1,0 +1,19 @@
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.loadModule = loadModule;
+
+require("source-map-support/register");
+
+function loadModule(name, context) {
+  try {
+    module.context = context;
+
+    require(name);
+  } catch (e) {
+    throw new Error(`Module ${name} can't get loaded. Are you sure you have installed it?\n` + 'Note: if you\'ve installed WebdriverIO globally you need to install ' + 'these external modules globally too!');
+  }
+}
+//# sourceMappingURL=data:application/json;charset=utf-8;base64,eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbIi4uL3NyYy91dGlscy5qcyJdLCJuYW1lcyI6WyJsb2FkTW9kdWxlIiwibmFtZSIsImNvbnRleHQiLCJtb2R1bGUiLCJyZXF1aXJlIiwiZSIsIkVycm9yIl0sIm1hcHBpbmdzIjoiOzs7Ozs7Ozs7QUFBTyxTQUFTQSxVQUFULENBQXFCQyxJQUFyQixFQUEyQkMsT0FBM0IsRUFBb0M7QUFDdkMsTUFBSTtBQUNBQyxJQUFBQSxNQUFNLENBQUNELE9BQVAsR0FBaUJBLE9BQWpCOztBQUNBRSxJQUFBQSxPQUFPLENBQUNILElBQUQsQ0FBUDtBQUNILEdBSEQsQ0FHRSxPQUFPSSxDQUFQLEVBQVU7QUFDUixVQUFNLElBQUlDLEtBQUosQ0FBVyxVQUFTTCxJQUFLLDBEQUFmLEdBQ0Esc0VBREEsR0FFQSxzQ0FGVixDQUFOO0FBR0g7QUFDSiIsInNvdXJjZXNDb250ZW50IjpbImV4cG9ydCBmdW5jdGlvbiBsb2FkTW9kdWxlIChuYW1lLCBjb250ZXh0KSB7XG4gICAgdHJ5IHtcbiAgICAgICAgbW9kdWxlLmNvbnRleHQgPSBjb250ZXh0XG4gICAgICAgIHJlcXVpcmUobmFtZSlcbiAgICB9IGNhdGNoIChlKSB7XG4gICAgICAgIHRocm93IG5ldyBFcnJvcihgTW9kdWxlICR7bmFtZX0gY2FuJ3QgZ2V0IGxvYWRlZC4gQXJlIHlvdSBzdXJlIHlvdSBoYXZlIGluc3RhbGxlZCBpdD9cXG5gICtcbiAgICAgICAgICAgICAgICAgICAgICAgICdOb3RlOiBpZiB5b3VcXCd2ZSBpbnN0YWxsZWQgV2ViZHJpdmVySU8gZ2xvYmFsbHkgeW91IG5lZWQgdG8gaW5zdGFsbCAnICtcbiAgICAgICAgICAgICAgICAgICAgICAgICd0aGVzZSBleHRlcm5hbCBtb2R1bGVzIGdsb2JhbGx5IHRvbyEnKVxuICAgIH1cbn1cbiJdfQ==
