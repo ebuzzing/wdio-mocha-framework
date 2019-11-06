@@ -2,7 +2,7 @@ import path from 'path'
 import Mocha from 'mocha'
 
 import logger from '@wdio/logger'
-import { runTestInFiberContext, executeHooksWithArgs } from '@wdio/config'
+import { runTestInFiberContext, executeHooksWithArgs } from '@wdio/utils'
 
 import { loadModule } from './utils'
 import { INTERFACES, EVENTS, NOOP } from './constants'
@@ -43,9 +43,10 @@ class MochaAdapter {
         this.retried = {}
         this.nextRetry = null
         this.runtimeError = null
+        this._hasTests = true
     }
 
-    async run () {
+    async init () {
         const { mochaOpts } = this.config
         const mocha = this.mocha = new Mocha(mochaOpts)
         mocha.loadFiles()
@@ -54,46 +55,87 @@ class MochaAdapter {
 
         this.specs.forEach((spec) => mocha.addFile(spec))
         mocha.suite.on('pre-require', ::this.preRequire)
+        this._loadFiles(mochaOpts)
+
+        return this
+    }
+
+    _loadFiles (mochaOpts) {
+        if (this.config.featureFlags.specFiltering !== true) {
+            return false
+        }
+        try {
+            this.mocha.loadFiles()
+
+            /**
+             * grep
+             */
+            const mochaRunner = new Mocha.Runner(this.mocha.suite)
+            if (mochaOpts.grep) {
+                mochaRunner.grep(this.mocha.options.grep, mochaOpts.invert)
+            }
+
+            this._hasTests = mochaRunner.total > 0
+        } catch (err) {
+            log.warn(
+                'Unable to load spec files quite likely because they rely on `browser` object that is not fully initialised.\n' +
+                '`browser` object has only `capabilities` and some flags like `isMobile`.\n' +
+                'Helper files that use other `browser` commands have to be moved to `before` hook.\n' +
+                `Spec file(s): ${this.specs.join(',')}\n`,
+                'Error: ', err
+            )
+        }
+    }
+
+    hasTests () {
+        /**
+         * filter specs only if feature enabled explicitly to avoid breaking changes.
+         * If the feature is enabled user should avoid interacting with `browser` object before session is started
+         */
+        return this.config.featureFlags.specFiltering !== true || this._hasTests
+    }
+
+    async run () {
+        const mocha = this.mocha
+        let runtimeError
+
+        const mochaRun = async (mocha) => {
+          const result = await new Promise((resolve) => {
+            try {
+              this.runner = mocha.run(resolve)
+            } catch (e) {
+              runtimeError = e
+              return resolve(1)
+            }
+
+            Object.keys(EVENTS).forEach((e) =>
+              this.runner.on(e, this.emit.bind(this, EVENTS[e])))
+
+            this.skipSuiteIfNeeded()
+            this.runner.suite.beforeAll(this.wrapHook('beforeSuite'))
+            this.runner.suite.afterAll(this.wrapHook('afterSuite'))
+          })
+
+          if (this.runner.failures && this.isRetryNeeded()) {
+            this.prepareRetry(mocha)
+            return mochaRun(mocha)
+          } else {
+            return result
+          }
+        }
 
         await executeHooksWithArgs(this.config.before, [this.capabilities, this.specs])
-        const result = await this.mochaRun(mocha)
-        await executeHooksWithArgs(this.config.after, [this.runtimeError || result, this.capabilities, this.specs])
+        const result = await mochaRun(mocha)
+        await executeHooksWithArgs(this.config.after, [runtimeError || result, this.capabilities, this.specs])
 
         /**
          * in case the spec has a runtime error throw after the wdio hook
          */
-        if (this.runtimeError) {
-            throw this.runtimeError
+        if (runtimeError) {
+            throw runtimeError
         }
 
         return result
-    }
-
-    async mochaRun(mocha) {
-        const result = await new Promise((resolve) => {
-            try {
-                this.runner = mocha.run(resolve)
-            } catch (e) {
-                this.runtimeError = e
-                return resolve(1)
-            }
-
-            Object.keys(EVENTS).forEach((e) =>
-                this.runner.on(e, this.emit.bind(this, EVENTS[e])))
-
-            this.skipSuiteIfNeeded()
-            this.runner.suite.beforeAll(this.wrapHook('beforeSuite'))
-            this.runner.suite.beforeEach(this.wrapHook('beforeTest'))
-            this.runner.suite.afterEach(this.wrapHook('afterTest'))
-            this.runner.suite.afterAll(this.wrapHook('afterSuite'))
-        })
-
-        if (this.runner.failures && this.isRetryNeeded()) {
-            this.prepareRetry(mocha)
-            return this.mochaRun(mocha)
-        } else {
-            return result
-        }
     }
 
     skipSuiteIfNeeded() {
@@ -156,14 +198,22 @@ class MochaAdapter {
         const match = MOCHA_UI_TYPE_EXTRACTOR.exec(options.ui)
         const type = (match && INTERFACES[match[1]] && match[1]) || DEFAULT_INTERFACE_TYPE
 
+        const hookArgsFn = (context) => {
+            return [{ ...context.test, parent: context.test.parent.title }, context]
+        }
+
         INTERFACES[type].forEach((fnName) => {
             let testCommand = INTERFACES[type][0]
+            const isTest = [testCommand, testCommand + '.only'].includes(fnName)
 
             runTestInFiberContext(
-                [testCommand, testCommand + '.only'],
-                this.config.beforeHook,
-                this.config.afterHook,
-                fnName
+                isTest,
+                isTest ? this.config.beforeTest : this.config.beforeHook,
+                hookArgsFn,
+                isTest ? this.config.afterTest : this.config.afterHook,
+                hookArgsFn,
+                fnName,
+                this.cid
             )
         })
         this.options(options, { context, file, mocha, options })
@@ -366,10 +416,10 @@ class MochaAdapter {
 
 const adapterFactory = {}
 
-adapterFactory.run = async function (...args) {
+adapterFactory.init = async function (...args) {
     const adapter = new MochaAdapter(...args)
-    const result = await adapter.run()
-    return result
+    const instance = await adapter.init()
+    return instance
 }
 
 export default adapterFactory
